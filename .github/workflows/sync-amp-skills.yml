@@ -1,0 +1,46 @@
+name: Sync skills to Amp
+
+# Mirrors skills/ into the Amp User Skills repository, so that repository
+# always matches skills/ on main. Skills added to it any other way
+# (Amp settings, imports) are removed on the next sync.
+
+on:
+  push:
+    branches: [main]
+    paths: ["skills/**", ".github/workflows/sync-amp-skills.yml"]
+  workflow_dispatch:
+
+concurrency:
+  group: sync-amp-skills
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    env:
+      # Access token from https://ampcode.com/settings (starts with sgamp_).
+      AMP_API_KEY: ${{ secrets.AMP_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Amp CLI
+        run: |
+          curl -fsSL https://ampcode.com/install.sh | bash
+          echo "$HOME/.amp/bin" >> "$GITHUB_PATH"
+
+      - name: Clone User Skills repository
+        run: amp clone user-skills "$RUNNER_TEMP/user-skills"
+
+      - name: Mirror skills/ and push
+        working-directory: ${{ runner.temp }}/user-skills
+        run: |
+          rsync -a --delete --exclude .git "$GITHUB_WORKSPACE/skills/" ./
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Amp User Skills already up to date."
+            exit 0
+          fi
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -m "Sync skills from ${GITHUB_REPOSITORY}@${GITHUB_SHA::7}"
+          git push origin HEAD:main
